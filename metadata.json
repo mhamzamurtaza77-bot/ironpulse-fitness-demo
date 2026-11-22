@@ -1,0 +1,6 @@
+{
+  "name": "IronPulse Fitness Studio",
+  "description": "Luxury strength training, personal coaching, recovery sauna, BMI & calorie planner, and 24/7 Voice AI Fitness Coach in London & Lahore.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": []
+}
