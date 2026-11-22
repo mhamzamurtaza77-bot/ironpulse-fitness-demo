@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   CheckCircle2,
@@ -76,13 +76,73 @@ const FEMALE_VOICE_PRIORITY = [
 const MALE_VOICE_PRIORITY = [
   'Natural',
   'Online',
-  'Ryan',
   'Guy',
+  'Ryan',
+  'Andrew',
+  'Christopher',
   'Daniel',
-  'George',
+  'David',
   'Google UK English Male',
   'Alex',
 ];
+
+const KNOWN_FEMALE_MARKERS = [
+  'jenny',
+  'sonia',
+  'libby',
+  'aria',
+  'samantha',
+  'victoria',
+  'karen',
+  'moira',
+  'tessa',
+  'fiona',
+  'kate',
+  'serena',
+  'susan',
+  'zira',
+  'hazel',
+  'heera',
+  'veena',
+  'kalpana',
+  'raveena',
+  'uzma',
+  'female',
+  'woman',
+  'ava',
+  'emma',
+  'allison',
+  'sara',
+];
+
+const KNOWN_MALE_MARKERS = [
+  'guy',
+  'ryan',
+  'andrew',
+  'christopher',
+  'daniel',
+  'david',
+  'george',
+  'alex',
+  'mark',
+  'richard',
+  'thomas',
+  'oliver',
+  'arthur',
+  'aaron',
+  'fred',
+  'rishi',
+  'prabhat',
+  'hemant',
+  'asad',
+  'male',
+  'man',
+];
+
+function containsWholeWord(text: string, words: string[]): boolean {
+  const lower = text.toLowerCase();
+  return words.some((word) => new RegExp(`\\b${word}\\b`, 'i').test(lower));
+}
 
 function createWelcomeMessage(language: CoachLanguage, gender: CoachGender): ChatMessage {
   const coachName = gender === 'female' ? 'Coach Sara' : 'Coach Adam';
@@ -91,17 +151,131 @@ function createWelcomeMessage(language: CoachLanguage, gender: CoachGender): Cha
     sender: 'coach',
     text:
       language === 'UR'
-        ? `خوش آمدید! میں ${coachName} ہوں، IronPulse کی 24/7 AI فٹنس کوچ۔ آپ مجھ سے ممبرشپ فیس، وزن کم کرنے یا مسلز پلان، جم اوقات پوچھ سکتے ہیں یا 3 دن کا فری ٹرائل بُک کر سکتے ہیں۔`
-        : `Hi there! I'm ${coachName}, your 24/7 IronPulse AI Fitness Coach. Ask about memberships, fat loss/muscle splits, London & Lahore timings, or tap a chip below to claim your Free 3-Day Trial.`,
+        ? `خوش آمدید! میں **${coachName}** ہوں، **IronPulse** کی 24/7 AI فٹنس کوچ۔\n\n• ممبرشپ فیس، وزن کم کرنے یا مسلز بنانے کا پلان پوچھیں\n• نیچے کلک کر کے **3 دن کا فری ٹرائل** بُک کریں\n\nبتائیں آج میں آپ کی کیا مدد کر سکتا ہوں؟`
+        : `Hi there! I'm **${coachName}**, your 24/7 **IronPulse Fitness** AI coach.\n\n• Ask about fat loss, muscle building, or diet plans\n• Check London & Lahore timings and membership fees\n• Tap **🎟️ Book Free Trial** below to claim your 3-day pass\n\nWhat fitness goal are you working on today?`,
   };
 }
 
 function cleanTextForSpeech(text: string): string {
   return text
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
-    .replace(/[•*#_]/g, ' ')
+    .replace(/\*\*/g, '')
+    .replace(/\*/g, '')
+    .replace(/^\s*[-•*#]+\s*/gm, '')
+    .replace(/[#_]/g, '')
+    .replace(/·/g, ', ')
+    .replace(/\bMon\s*[–-]\s*Sat\b/gi, 'Monday to Saturday')
+    .replace(/(\d)\s*[–-]\s*(\d)/g, '$1 to $2')
+    .replace(/\bRs\s+/g, 'Rupees ')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => (/[.!?۔:]$/.test(line) ? line : `${line}.`))
+    .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function splitIntoSpeakableChunks(rawText: string): string[] {
+  const normalized = cleanTextForSpeech(rawText);
+  if (!normalized) return [];
+
+  const rawSentences = normalized.match(/[^.!?۔]+[.!?۔]*/g) ?? [normalized];
+  const chunks: string[] = [];
+  const MAX_CHUNK_LEN = 165;
+
+  for (const rawSentence of rawSentences) {
+    const sentence = rawSentence.trim();
+    if (!sentence) continue;
+
+    if (sentence.length <= MAX_CHUNK_LEN) {
+      chunks.push(sentence);
+      continue;
+    }
+
+    const words = sentence.split(/\s+/);
+    let current = '';
+    for (const word of words) {
+      if (current.length + word.length + 1 > MAX_CHUNK_LEN) {
+        if (current) chunks.push(current.trim());
+        current = word;
+      } else {
+        current = current ? `${current} ${word}` : word;
+      }
+    }
+    if (current.trim()) {
+      chunks.push(current.trim());
+    }
+  }
+
+  return chunks;
+}
+
+/**
+ * Safely renders **bold** spans and bullet lines without innerHTML injection.
+ */
+function renderInlineBold(line: string, isUser: boolean): ReactNode[] {
+  const parts = line.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, idx) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      return (
+        <strong
+          key={idx}
+          className={isUser ? 'font-bold text-[#090D16]' : 'font-semibold text-white'}
+        >
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    return <span key={idx}>{part}</span>;
+  });
+}
+
+function FormattedMessageContent({
+  text,
+  isUser,
+}: {
+  text: string;
+  isUser: boolean;
+}) {
+  const lines = text.split('\n');
+
+  return (
+    <div className="space-y-1.5">
+      {lines.map((rawLine, idx) => {
+        const line = rawLine.trim();
+        if (!line) {
+          return <div key={idx} className="h-1" aria-hidden="true" />;
+        }
+
+        const bulletMatch = line.match(/^(?:•|-|\*)\s+(.+)$/);
+        if (bulletMatch) {
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-0.5">
+              <span
+                aria-hidden="true"
+                className={
+                  isUser ? 'text-[#090D16] font-bold' : 'text-[#C8F135] font-bold'
+                }
+              >
+                •
+              </span>
+              <span className="flex-1">{renderInlineBold(bulletMatch[1], isUser)}</span>
+            </div>
+          );
+        }
+
+        return <p key={idx}>{renderInlineBold(line, isUser)}</p>;
+      })}
+    </div>
+  );
+}
+
+interface PendingSpeechRequest {
+  id: string;
+  text: string;
+  lang: CoachLanguage;
+  gender: CoachGender;
 }
 
 export function AiCoachWidget({
@@ -115,6 +289,8 @@ export function AiCoachWidget({
   const [coachGender, setCoachGender] = useState<CoachGender>('female');
   const [speakerEnabled, setSpeakerEnabled] = useState<boolean>(true);
   const [isListening, setIsListening] = useState<boolean>(false);
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [isThinking, setIsThinking] = useState<boolean>(false);
   const [voiceHint, setVoiceHint] = useState<string>('');
   const [inputValue, setInputValue] = useState<string>('');
   const [bookingState, setBookingState] = useState<BookingFlowState>({
@@ -125,9 +301,13 @@ export function AiCoachWidget({
     createWelcomeMessage('EN', 'female'),
   ]);
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [pendingSpeech, setPendingSpeech] = useState<PendingSpeechRequest | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstanceLike | null>(null);
+  const speechSessionRef = useRef<number>(0);
+  const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const handleSendMessageRef = useRef<(text: string) => void>(() => {});
 
   // Load browser speech synthesis voices cleanly
   useEffect(() => {
@@ -147,55 +327,149 @@ export function AiCoachWidget({
     };
   }, []);
 
-  // Scroll to newest message
-  useEffect(() => {
-    if (isOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, isOpen]);
-
-  // Handle queued prompt sent from BMI Calculator or Hero CTA
-  useEffect(() => {
-    if (isOpen && queuedPrompt) {
-      handleSendMessage(queuedPrompt);
-      onConsumeQueuedPrompt();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, queuedPrompt]);
-
   const stopSpeaking = () => {
+    speechSessionRef.current += 1;
+    activeUtteranceRef.current = null;
+    setIsSpeaking(false);
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
   };
 
-  const selectPreferredVoice = (gender: CoachGender): SpeechSynthesisVoice | null => {
-    if (availableVoices.length === 0) return null;
-    const priorityList =
-      gender === 'female' ? FEMALE_VOICE_PRIORITY : MALE_VOICE_PRIORITY;
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+      recognitionRef.current?.stop();
+    };
+  }, []);
 
-    for (const token of priorityList) {
-      const matched = availableVoices.find(
-        (v) =>
-          v.name.toLowerCase().includes(token.toLowerCase()) &&
-          (gender === 'female'
-            ? !v.name.toLowerCase().includes('male') ||
-              v.name.toLowerCase().includes('female')
-            : !v.name.toLowerCase().includes('female'))
-      );
-      if (matched) return matched;
+  /**
+   * Strict gender-aware voice selector:
+   * - Female (Coach Sara): prioritizes Natural/Online + Jenny/Sonia/Libby/Aria/Samantha/Google UK English Female, never picks a known male voice.
+   * - Male (Coach Adam): filters out ALL known female voices first, then prioritizes Natural/Online + Guy/Ryan/Andrew/Christopher/Daniel/David/Google UK English Male/Alex.
+   */
+  const selectPreferredVoice = (
+    gender: CoachGender,
+    lang: CoachLanguage
+  ): { voice: SpeechSynthesisVoice | null; hasUrduVoice: boolean } => {
+    if (availableVoices.length === 0) {
+      return { voice: null, hasUrduVoice: false };
     }
 
-    // Fallback to English voice
-    return (
-      availableVoices.find((v) => v.lang.toLowerCase().startsWith('en-gb')) ||
-      availableVoices.find((v) => v.lang.toLowerCase().startsWith('en')) ||
-      availableVoices[0] ||
-      null
+    const urduVoices = availableVoices.filter((v) =>
+      v.lang.toLowerCase().startsWith('ur')
     );
+
+    if (lang === 'UR' && urduVoices.length > 0) {
+      const genderSafeUrdu =
+        gender === 'male'
+          ? urduVoices.find((v) => !containsWholeWord(v.name, KNOWN_FEMALE_MARKERS))
+          : urduVoices.find((v) => !containsWholeWord(v.name, KNOWN_MALE_MARKERS));
+      if (genderSafeUrdu) {
+        return { voice: genderSafeUrdu, hasUrduVoice: true };
+      }
+      return { voice: urduVoices[0], hasUrduVoice: true };
+    }
+
+    const englishVoices = availableVoices.filter((v) =>
+      v.lang.toLowerCase().startsWith('en')
+    );
+    const pool = englishVoices.length > 0 ? englishVoices : availableVoices;
+
+    if (gender === 'male') {
+      // Strictly exclude all known female voices when Male is selected
+      const nonFemalePool = pool.filter(
+        (v) => !containsWholeWord(v.name, KNOWN_FEMALE_MARKERS)
+      );
+
+      // 1. Best match: Natural/Online AND explicit male voice name
+      const naturalMale = nonFemalePool.find((v) => {
+        const lower = v.name.toLowerCase();
+        const isNaturalOrOnline =
+          lower.includes('natural') || lower.includes('online');
+        const isExplicitMale = MALE_VOICE_PRIORITY.slice(2).some((token) =>
+          lower.includes(token.toLowerCase())
+        );
+        return isNaturalOrOnline && isExplicitMale;
+      });
+      if (naturalMale) {
+        return { voice: naturalMale, hasUrduVoice: urduVoices.length > 0 };
+      }
+
+      // 2. Priority match across exact male priority list
+      for (const token of MALE_VOICE_PRIORITY.slice(2)) {
+        const matched = nonFemalePool.find((v) =>
+          v.name.toLowerCase().includes(token.toLowerCase())
+        );
+        if (matched) {
+          return { voice: matched, hasUrduVoice: urduVoices.length > 0 };
+        }
+      }
+
+      // 3. Any remaining non-female Natural/Online voice
+      const naturalNonFemale = nonFemalePool.find((v) => {
+        const lower = v.name.toLowerCase();
+        return lower.includes('natural') || lower.includes('online');
+      });
+      if (naturalNonFemale) {
+        return { voice: naturalNonFemale, hasUrduVoice: urduVoices.length > 0 };
+      }
+
+      // 4. Any non-female voice (prefer en-GB / en-US)
+      const fallbackMale =
+        nonFemalePool.find((v) => v.lang.toLowerCase().startsWith('en-gb')) ||
+        nonFemalePool[0] ||
+        null;
+      return { voice: fallbackMale, hasUrduVoice: urduVoices.length > 0 };
+    }
+
+    // Female (Coach Sara): strictly exclude known male voices
+    const nonMalePool = pool.filter(
+      (v) => !containsWholeWord(v.name, KNOWN_MALE_MARKERS)
+    );
+
+    const naturalFemale = nonMalePool.find((v) => {
+      const lower = v.name.toLowerCase();
+      const isNaturalOrOnline =
+        lower.includes('natural') || lower.includes('online');
+      const isExplicitFemale = FEMALE_VOICE_PRIORITY.slice(2).some((token) =>
+        lower.includes(token.toLowerCase())
+      );
+      return isNaturalOrOnline && isExplicitFemale;
+    });
+    if (naturalFemale) {
+      return { voice: naturalFemale, hasUrduVoice: urduVoices.length > 0 };
+    }
+
+    for (const token of FEMALE_VOICE_PRIORITY.slice(2)) {
+      const matched = nonMalePool.find((v) =>
+        v.name.toLowerCase().includes(token.toLowerCase())
+      );
+      if (matched) {
+        return { voice: matched, hasUrduVoice: urduVoices.length > 0 };
+      }
+    }
+
+    const naturalNonMale = nonMalePool.find((v) => {
+      const lower = v.name.toLowerCase();
+      return lower.includes('natural') || lower.includes('online');
+    });
+    if (naturalNonMale) {
+      return { voice: naturalNonMale, hasUrduVoice: urduVoices.length > 0 };
+    }
+
+    const fallbackFemale =
+      nonMalePool.find((v) => v.lang.toLowerCase().startsWith('en-gb')) ||
+      nonMalePool[0] ||
+      null;
+    return { voice: fallbackFemale, hasUrduVoice: urduVoices.length > 0 };
   };
 
-  const speakText = (rawText: string, genderOverride?: CoachGender) => {
+  const speakFullMessageSequentially = (
+    rawText: string,
+    genderOverride?: CoachGender,
+    langOverride?: CoachLanguage
+  ) => {
     if (
       !speakerEnabled ||
       typeof window === 'undefined' ||
@@ -204,31 +478,121 @@ export function AiCoachWidget({
       return;
     }
 
+    const chunks = splitIntoSpeakableChunks(rawText);
+    if (chunks.length === 0) return;
+
     stopSpeaking();
-    const clean = cleanTextForSpeech(rawText);
-    if (!clean) return;
-
+    const sessionId = speechSessionRef.current;
     const activeGender = genderOverride ?? coachGender;
-    const utterance = new SpeechSynthesisUtterance(clean);
-    const chosenVoice = selectPreferredVoice(activeGender);
-    if (chosenVoice) {
-      utterance.voice = chosenVoice;
-    }
+    const activeLang = langOverride ?? language;
+    const { voice } = selectPreferredVoice(activeGender, activeLang);
 
-    if (activeGender === 'female') {
-      utterance.pitch = 1.04;
-      utterance.rate = 0.94;
-    } else {
-      utterance.pitch = 0.92;
-      utterance.rate = 0.95;
-    }
+    setIsSpeaking(true);
 
-    window.speechSynthesis.speak(utterance);
+    const speakChunkAt = (index: number) => {
+      if (speechSessionRef.current !== sessionId) {
+        return;
+      }
+      if (index >= chunks.length) {
+        activeUtteranceRef.current = null;
+        setIsSpeaking(false);
+        return;
+      }
+
+      const utterance = new SpeechSynthesisUtterance(chunks[index]);
+      activeUtteranceRef.current = utterance;
+
+      if (voice) {
+        utterance.voice = voice;
+      }
+
+      if (activeGender === 'female') {
+        utterance.pitch = 1.04;
+        utterance.rate = 0.94;
+      } else {
+        utterance.pitch = 0.92;
+        utterance.rate = 0.95;
+      }
+
+      utterance.onend = () => {
+        if (speechSessionRef.current === sessionId) {
+          speakChunkAt(index + 1);
+        }
+      };
+
+      utterance.onerror = (event) => {
+        if (speechSessionRef.current !== sessionId) return;
+        if (event.error === 'canceled' || event.error === 'interrupted') {
+          activeUtteranceRef.current = null;
+          setIsSpeaking(false);
+          return;
+        }
+        speakChunkAt(index + 1);
+      };
+
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+      window.speechSynthesis.speak(utterance);
+    };
+
+    speakChunkAt(0);
   };
 
-  const handleSendMessage = (textToSend: string) => {
+  // Auto-scroll to newest message
+  useEffect(() => {
+    if (isOpen) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isThinking, isOpen]);
+
+  // Trigger speech AFTER the full message bubble is rendered in the DOM
+  useEffect(() => {
+    if (!pendingSpeech) return;
+    const request = pendingSpeech;
+    setPendingSpeech(null);
+
+    const frameId = window.requestAnimationFrame(() => {
+      speakFullMessageSequentially(request.text, request.gender, request.lang);
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSpeech]);
+
+  // Handle queued prompt sent from BMI Calculator or Hero CTA
+  useEffect(() => {
+    if (isOpen && queuedPrompt) {
+      void handleSendMessage(queuedPrompt);
+      onConsumeQueuedPrompt();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, queuedPrompt]);
+
+  const appendCoachMessageAndSpeak = (
+    coachMsg: ChatMessage,
+    spokenFallbackText: string,
+    activeGender: CoachGender,
+    activeLang: CoachLanguage
+  ) => {
+    setMessages((prev) => [...prev, coachMsg]);
+
+    const { hasUrduVoice } = selectPreferredVoice(activeGender, activeLang);
+    const containsUrduChars = /[\u0600-\u06FF]/.test(coachMsg.text);
+    const fullSpeechText =
+      containsUrduChars && !hasUrduVoice ? spokenFallbackText : coachMsg.text;
+
+    setPendingSpeech({
+      id: coachMsg.id,
+      text: fullSpeechText,
+      lang: activeLang,
+      gender: activeGender,
+    });
+  };
+
+  const handleSendMessage = async (textToSend: string) => {
     const trimmed = textToSend.trim();
-    if (!trimmed) return;
+    if (!trimmed || isThinking) return;
 
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -236,35 +600,136 @@ export function AiCoachWidget({
       text: trimmed,
     };
 
-    const reply = generateCoachReply(
+    // Always append user message immediately
+    setMessages((prev) => [...prev, userMsg]);
+    setInputValue('');
+
+    const isChipInterruption =
+      trimmed === '💪 Membership Fees' ||
+      trimmed === '🔥 Fat Loss / Muscle Plan' ||
+      trimmed === '🕒 Gym Timings' ||
+      trimmed === '🧑‍🏫 Personal Trainers';
+
+    const isBookingFlowTurn =
+      trimmed === '🎟️ Book Free Trial' ||
+      (bookingState.active && !isChipInterruption) ||
+      /\b(free trial|book trial|trial pass|3-day|3 day|demo pass|ٹرائل|فری ٹرائل)\b/i.test(
+        trimmed.toLowerCase()
+      );
+
+    // Deterministic 3-step Free Trial Pass flow (guaranteed WhatsApp pass card)
+    if (isBookingFlowTurn) {
+      const reply = generateCoachReply(
+        trimmed,
+        language,
+        coachGender,
+        currency,
+        bookingState
+      );
+      const coachMsg: ChatMessage = {
+        id: `coach-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        sender: 'coach',
+        text: reply.text,
+        quickOptions: reply.quickOptions,
+        confirmedPass: reply.confirmedPass,
+      };
+      setBookingState(reply.nextBookingState);
+      appendCoachMessageAndSpeak(coachMsg, reply.spokenText, coachGender, language);
+      return;
+    }
+
+    // Dual-Mode Intelligent Brain: Try live Gemini via /api/coach first, seamlessly fall back to local conversational responder
+    setBookingState({ active: false, step: 'done' });
+    setIsThinking(true);
+
+    let liveGeminiText: string | null = null;
+    try {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+
+      const res = await fetch('/api/coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          message: trimmed,
+          history: messages.slice(-6).map((m) => ({ sender: m.sender, text: m.text })),
+          coachGender,
+          language,
+          currency,
+        }),
+      });
+      window.clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = (await res.json()) as { fallback?: boolean; text?: string };
+        if (!data.fallback && typeof data.text === 'string' && data.text.trim()) {
+          liveGeminiText = data.text.trim();
+        }
+      }
+    } catch {
+      // Seamless silent fallback on network/Vercel/missing-API environments
+    } finally {
+      setIsThinking(false);
+    }
+
+    if (liveGeminiText) {
+      const fallbackReference = generateCoachReply(
+        trimmed,
+        language,
+        coachGender,
+        currency,
+        { active: false, step: 'done' }
+      );
+      const coachMsg: ChatMessage = {
+        id: `coach-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        sender: 'coach',
+        text: liveGeminiText,
+      };
+      appendCoachMessageAndSpeak(
+        coachMsg,
+        fallbackReference.spokenText,
+        coachGender,
+        language
+      );
+      return;
+    }
+
+    const fallbackReply = generateCoachReply(
       trimmed,
       language,
       coachGender,
       currency,
-      bookingState
+      { active: false, step: 'done' }
     );
-
     const coachMsg: ChatMessage = {
       id: `coach-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       sender: 'coach',
-      text: reply.text,
-      quickOptions: reply.quickOptions,
-      confirmedPass: reply.confirmedPass,
+      text: fallbackReply.text,
+      quickOptions: fallbackReply.quickOptions,
+      confirmedPass: fallbackReply.confirmedPass,
     };
+    appendCoachMessageAndSpeak(
+      coachMsg,
+      fallbackReply.spokenText,
+      coachGender,
+      language
+    );
+  };
 
-    setMessages((prev) => [...prev, userMsg, coachMsg]);
-    setBookingState(reply.nextBookingState);
-    setInputValue('');
-    speakText(reply.spokenText);
+  handleSendMessageRef.current = (msgText: string) => {
+    void handleSendMessage(msgText);
   };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    handleSendMessage(inputValue);
+    void handleSendMessage(inputValue);
   };
 
   const handleClearChat = () => {
     stopSpeaking();
+    setPendingSpeech(null);
+    setIsThinking(false);
     setBookingState({ active: false, step: 'done' });
     setMessages([createWelcomeMessage(language, coachGender)]);
     setVoiceHint('');
@@ -273,6 +738,8 @@ export function AiCoachWidget({
   const handleLanguageChange = (nextLang: CoachLanguage) => {
     setLanguage(nextLang);
     stopSpeaking();
+    setPendingSpeech(null);
+    setIsThinking(false);
     setBookingState({ active: false, step: 'done' });
     setMessages([createWelcomeMessage(nextLang, coachGender)]);
   };
@@ -280,18 +747,21 @@ export function AiCoachWidget({
   const handleGenderChange = (nextGender: CoachGender) => {
     setCoachGender(nextGender);
     const coachLabel = nextGender === 'female' ? 'Coach Sara' : 'Coach Adam';
+    const switchText =
+      language === 'UR'
+        ? `اب آپ **${coachLabel}** سے بات کر رہے ہیں۔ بتائیں آج کس فٹنس ہدف پر کام کرنا ہے؟`
+        : `Switched to **${coachLabel}**. How can I help with your training or trial booking today?`;
+
     const switchNote: ChatMessage = {
       id: `switch-${Date.now()}`,
       sender: 'coach',
-      text:
-        language === 'UR'
-          ? `اب آپ ${coachLabel} سے بات کر رہے ہیں۔ بتائیں آج کس فٹنس ہدف پر کام کرنا ہے؟`
-          : `Switched to ${coachLabel}. How can I help with your training or trial booking?`,
+      text: switchText,
     };
-    setMessages((prev) => [...prev, switchNote]);
-    speakText(
-      `Switched to ${coachLabel}. How can I help with your training today?`,
-      nextGender
+    appendCoachMessageAndSpeak(
+      switchNote,
+      `Switched to ${coachLabel}. How can I help with your training or trial booking today?`,
+      nextGender,
+      language
     );
   };
 
@@ -335,7 +805,8 @@ export function AiCoachWidget({
       recognition.onresult = (event) => {
         const transcript = event.results?.[0]?.[0]?.transcript;
         if (transcript) {
-          handleSendMessage(transcript);
+          onToggleOpen(true);
+          handleSendMessageRef.current(transcript);
         }
       };
 
@@ -396,28 +867,31 @@ export function AiCoachWidget({
                     </h2>
                   </div>
                   <p className="text-[11px] text-slate-400 truncate">
-                    24/7 Voice &amp; Chat AI Fitness Coach
+                    {isSpeaking
+                      ? `${coachGender === 'female' ? 'Coach Sara' : 'Coach Adam'} is reading full reply...`
+                      : '24/7 Voice & Chat AI Fitness Coach'}
                   </p>
                 </div>
 
-                {/* Header Action Controls: Speaker, Clear Chat, Close */}
+                {/* Header Action Controls: Speaker Auto-Read, Clear Chat, Close */}
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
                     onClick={handleToggleSpeaker}
-                    aria-label={speakerEnabled ? 'Mute voice replies' : 'Unmute voice replies'}
-                    title={speakerEnabled ? 'Voice On' : 'Voice Muted'}
-                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                    aria-label={speakerEnabled ? 'Mute voice replies' : 'Enable voice auto-read'}
+                    title={speakerEnabled ? 'Speaker Auto-Read: ON' : 'Speaker Auto-Read: OFF'}
+                    className={`inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
                       speakerEnabled
                         ? 'text-[#C8F135] bg-white/10'
                         : 'text-slate-400 hover:text-white hover:bg-white/10'
                     }`}
                   >
                     {speakerEnabled ? (
-                      <Volume2 className="w-4 h-4" />
+                      <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                     ) : (
-                      <VolumeX className="w-4 h-4" />
+                      <VolumeX className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                     )}
+                    <span>{speakerEnabled ? 'Voice' : 'Muted'}</span>
                   </button>
 
                   <button
@@ -427,7 +901,7 @@ export function AiCoachWidget({
                     title="Clear Chat"
                     className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-medium text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                   >
-                    <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                    <RotateCcw className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                     <span>Clear Chat</span>
                   </button>
 
@@ -446,7 +920,7 @@ export function AiCoachWidget({
               </div>
 
               {/* Language & Voice Switcher Row */}
-              <div className="flex items-center justify-between gap-2 text-[11px]">
+              <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
                 {/* EN | اردو Toggle */}
                 <div
                   role="group"
@@ -481,29 +955,29 @@ export function AiCoachWidget({
                 <div
                   role="group"
                   aria-label="Coach Voice Persona"
-                  className="inline-flex p-0.5 rounded-lg bg-[#090D16] border border-white/10 min-w-0"
+                  className="inline-flex p-0.5 rounded-lg bg-[#090D16] border border-white/10 shrink-0"
                 >
                   <button
                     type="button"
                     onClick={() => handleGenderChange('female')}
-                    className={`px-2 py-1 rounded-md font-medium transition-colors truncate cursor-pointer ${
+                    className={`px-2 py-1 rounded-md text-[10.5px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
                       coachGender === 'female'
                         ? 'bg-white text-[#090D16] font-semibold'
                         : 'text-slate-300 hover:text-white'
                     }`}
                   >
-                    Female (Sara)
+                    Female (Coach Sara)
                   </button>
                   <button
                     type="button"
                     onClick={() => handleGenderChange('male')}
-                    className={`px-2 py-1 rounded-md font-medium transition-colors truncate cursor-pointer ${
+                    className={`px-2 py-1 rounded-md text-[10.5px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
                       coachGender === 'male'
                         ? 'bg-white text-[#090D16] font-semibold'
                         : 'text-slate-300 hover:text-white'
                     }`}
                   >
-                    Male (Adam)
+                    Male (Coach Adam)
                   </button>
                 </div>
               </div>
@@ -511,81 +985,114 @@ export function AiCoachWidget({
 
             {/* Scrollable Messages Area */}
             <div className="flex-1 min-h-0 overflow-y-auto px-3.5 py-3.5 space-y-3 bg-[#090D16]">
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex flex-col ${
-                    msg.sender === 'user' ? 'items-end' : 'items-start'
-                  }`}
-                >
+              {messages.map((msg) => {
+                const isUser = msg.sender === 'user';
+                const isRtlText = !isUser && /[\u0600-\u06FF]/.test(msg.text);
+                return (
                   <div
-                    dir={language === 'UR' && msg.sender === 'coach' ? 'auto' : 'ltr'}
-                    className={`max-w-[90%] px-3.5 py-2.5 rounded-2xl text-xs sm:text-[13px] leading-relaxed whitespace-pre-line ${
-                      msg.sender === 'user'
-                        ? 'bg-[#C8F135] text-[#090D16] font-medium rounded-br-sm'
-                        : 'bg-[#131B2E] text-slate-100 border border-white/10 rounded-bl-sm'
-                    }`}
+                    key={msg.id}
+                    className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
                   >
-                    {msg.text}
-                  </div>
+                    <div
+                      dir={isRtlText ? 'auto' : 'ltr'}
+                      className={`max-w-[90%] px-3.5 py-2.5 rounded-2xl text-xs sm:text-[13px] leading-relaxed ${
+                        isUser
+                          ? 'bg-[#C8F135] text-[#090D16] font-medium rounded-br-sm'
+                          : 'bg-[#131B2E] text-slate-100 border border-white/10 rounded-bl-sm'
+                      }`}
+                    >
+                      <FormattedMessageContent text={msg.text} isUser={isUser} />
+                      {!isUser && (
+                        <div className="mt-2 pt-1.5 border-t border-white/10 flex items-center justify-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSpeakerEnabled(true);
+                              speakFullMessageSequentially(msg.text, coachGender, language);
+                            }}
+                            aria-label="Read reply aloud"
+                            className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400 hover:text-[#C8F135] transition-colors cursor-pointer"
+                          >
+                            <Volume2 className="w-3 h-3" aria-hidden="true" />
+                            <span>Listen</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
-                  {/* Step-specific clickable options during booking flow */}
-                  {msg.quickOptions && msg.quickOptions.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5 max-w-[92%]">
-                      {msg.quickOptions.map((opt) => (
-                        <button
-                          key={opt}
-                          type="button"
-                          onClick={() => handleSendMessage(opt)}
-                          className="px-2.5 py-1.5 rounded-lg bg-[#151D2F] border border-[#D4AF37]/40 text-[11px] font-medium text-[#D4AF37] hover:bg-[#D4AF37] hover:text-[#090D16] transition-colors cursor-pointer"
+                    {/* Step-specific clickable options during booking flow */}
+                    {msg.quickOptions && msg.quickOptions.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5 max-w-[92%]">
+                        {msg.quickOptions.map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => void handleSendMessage(opt)}
+                            className="px-2.5 py-1.5 rounded-lg bg-[#151D2F] border border-[#D4AF37]/40 text-[11px] font-medium text-[#D4AF37] hover:bg-[#D4AF37] hover:text-[#090D16] transition-colors cursor-pointer"
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Confirmed Pass Card from In-Chat Booking Flow */}
+                    {msg.confirmedPass && (
+                      <div className="mt-2.5 w-full max-w-[94%] p-3.5 rounded-xl bg-[#131B2E] border border-[#C8F135]/60 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#C8F135]">
+                            <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+                            <span>Free 3-Day Trial Pass</span>
+                          </span>
+                          <span className="font-mono-num text-[11px] font-semibold text-white">
+                            {msg.confirmedPass.passCode}
+                          </span>
+                        </div>
+
+                        <div className="text-[11px] text-slate-300 space-y-1 border-t border-white/10 pt-2">
+                          <p>
+                            <span className="text-slate-400">Name:</span>{' '}
+                            <span className="text-white font-medium">
+                              {msg.confirmedPass.name}
+                            </span>
+                          </p>
+                          <p>
+                            <span className="text-slate-400">Goal:</span>{' '}
+                            <span className="text-white font-medium">
+                              {msg.confirmedPass.goal}
+                            </span>
+                          </p>
+                          <p>
+                            <span className="text-slate-400">Session:</span>{' '}
+                            <span className="text-white font-medium">
+                              {msg.confirmedPass.slot}
+                            </span>
+                          </p>
+                        </div>
+
+                        <a
+                          href={msg.confirmedPass.whatsappUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#C8F135] text-[#090D16] text-xs font-bold hover:bg-[#d8fb54] transition-colors"
                         >
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Confirmed Pass Card from In-Chat Booking Flow */}
-                  {msg.confirmedPass && (
-                    <div className="mt-2.5 w-full max-w-[94%] p-3.5 rounded-xl bg-[#131B2E] border border-[#C8F135]/60 space-y-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#C8F135]">
-                          <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
-                          <span>Free 3-Day Trial Pass</span>
-                        </span>
-                        <span className="font-mono-num text-[11px] font-semibold text-white">
-                          {msg.confirmedPass.passCode}
-                        </span>
+                          <span>Confirm on WhatsApp ↗</span>
+                          <ExternalLink className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                        </a>
                       </div>
+                    )}
+                  </div>
+                );
+              })}
 
-                      <div className="text-[11px] text-slate-300 space-y-1 border-t border-white/10 pt-2">
-                        <p>
-                          <span className="text-slate-400">Name:</span>{' '}
-                          <span className="text-white font-medium">{msg.confirmedPass.name}</span>
-                        </p>
-                        <p>
-                          <span className="text-slate-400">Goal:</span>{' '}
-                          <span className="text-white font-medium">{msg.confirmedPass.goal}</span>
-                        </p>
-                        <p>
-                          <span className="text-slate-400">Session:</span>{' '}
-                          <span className="text-white font-medium">{msg.confirmedPass.slot}</span>
-                        </p>
-                      </div>
-
-                      <a
-                        href={msg.confirmedPass.whatsappUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#C8F135] text-[#090D16] text-xs font-bold hover:bg-[#d8fb54] transition-colors"
-                      >
-                        <span>Confirm on WhatsApp ↗</span>
-                        <ExternalLink className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                      </a>
-                    </div>
-                  )}
+              {isThinking && (
+                <div className="flex items-start">
+                  <div className="px-3.5 py-2.5 rounded-2xl rounded-bl-sm bg-[#131B2E] border border-white/10 text-xs text-slate-300">
+                    {coachGender === 'female' ? 'Coach Sara' : 'Coach Adam'} is typing...
+                  </div>
                 </div>
-              ))}
+              )}
+
               <div ref={messagesEndRef} />
             </div>
 
@@ -595,7 +1102,7 @@ export function AiCoachWidget({
                 <button
                   key={chip}
                   type="button"
-                  onClick={() => handleSendMessage(chip)}
+                  onClick={() => void handleSendMessage(chip)}
                   className="px-2.5 py-1.5 rounded-lg bg-[#151D2F] border border-white/10 text-[11px] font-medium text-slate-200 hover:border-[#C8F135] hover:text-[#C8F135] transition-colors whitespace-nowrap cursor-pointer"
                 >
                   {chip}
@@ -644,8 +1151,9 @@ export function AiCoachWidget({
 
               <button
                 type="submit"
+                disabled={isThinking}
                 aria-label="Send message"
-                className="p-2.5 rounded-xl bg-[#C8F135] text-[#090D16] hover:bg-[#d8fb54] transition-colors shrink-0 cursor-pointer"
+                className="p-2.5 rounded-xl bg-[#C8F135] text-[#090D16] hover:bg-[#d8fb54] disabled:opacity-50 transition-colors shrink-0 cursor-pointer"
               >
                 <Send className="w-4 h-4" />
               </button>
